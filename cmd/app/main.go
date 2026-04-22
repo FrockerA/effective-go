@@ -1,6 +1,8 @@
 package main
 
 import (
+	"effective-go/internal/repository"
+	"effective-go/internal/service"
 	"log"
 	"net/http"
 
@@ -25,8 +27,19 @@ func main() {
 	}
 	defer db.Close()
 
+	subRepo := repository.NewSubscriptionRepo(db)
+	subService := service.NewSubscriptionService(subRepo)
+	subHandler := handler.NewSubscriptionHandler(subService)
+
 	r := chi.NewRouter()
+
 	r.Get("/health", handler.Health)
+
+	r.Route("/subscriptions", func(r chi.Router) {
+		r.Post("/", subHandler.Create)
+		r.Get("/", subHandler.List)
+		r.Get("/total", subHandler.CalculateTotal)
+	})
 
 	log.Printf("server started on :%s", cfg.AppPort)
 	if err = http.ListenAndServe(":"+cfg.AppPort, r); err != nil {
