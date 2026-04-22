@@ -10,6 +10,8 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.12.3
 	github.com/swaggo/http-swagger v1.3.4
+	github.com/swaggo/swag v1.16.6
+	go.uber.org/zap v1.27.1
 )
 
 require (
@@ -25,9 +27,7 @@ require (
 	github.com/go-openapi/swag/typeutils v0.26.0 // indirect
 	github.com/go-openapi/swag/yamlutils v0.26.0 // indirect
 	github.com/swaggo/files v1.0.1 // indirect
-	github.com/swaggo/swag v1.16.6 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
