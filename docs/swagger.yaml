@@ -235,4 +235,50 @@ paths:
       summary: Обновить подписку
       tags:
       - subscriptions
+  /subscriptions/total:
+    get:
+      description: Считает суммарную стоимость подписок за выбранный период
+      parameters:
+      - description: Дата начала периода (MM-YYYY)
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: Дата окончания периода (MM-YYYY)
+        in: query
+        name: end_date
+        required: true
+        type: string
+      - description: ID пользователя (UUID)
+        in: query
+        name: user_id
+        type: string
+      - description: Название сервиса
+        in: query
+        name: service_name
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Возвращает total_cost
+          schema:
+            additionalProperties:
+              type: integer
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Расчет суммарной стоимости
+      tags:
+      - subscriptions
 swagger: "2.0"

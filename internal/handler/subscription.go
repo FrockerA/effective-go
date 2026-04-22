@@ -1,22 +1,25 @@
 package handler
 
 import (
-	_ "effective-go/internal/model"
-	"effective-go/internal/service"
 	"encoding/json"
 	"errors"
-	"github.com/go-chi/chi/v5"
 	"net/http"
 
+	_ "effective-go/internal/model"
+	"effective-go/internal/service"
+
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 type SubscriptionHandler struct {
 	service *service.SubscriptionService
+	logger  *zap.Logger
 }
 
-func NewSubscriptionHandler(s *service.SubscriptionService) *SubscriptionHandler {
-	return &SubscriptionHandler{service: s}
+func NewSubscriptionHandler(s *service.SubscriptionService, l *zap.Logger) *SubscriptionHandler {
+	return &SubscriptionHandler{service: s, logger: l}
 }
 
 // Create godoc
@@ -33,17 +36,19 @@ func NewSubscriptionHandler(s *service.SubscriptionService) *SubscriptionHandler
 func (h *SubscriptionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var dto service.CreateDTO
 	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+		h.logger.Warn("invalid request body", zap.Error(err))
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	sub, err := h.service.Create(r.Context(), dto)
 	if err != nil {
-
 		if errors.Is(err, service.ErrInvalidDateFormat) || errors.Is(err, service.ErrInvalidDateOrder) {
+			h.logger.Warn("validation error during create", zap.Error(err))
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		h.logger.Error("failed to create subscription", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, "failed to create subscription")
 		return
 	}
@@ -68,6 +73,7 @@ func (h *SubscriptionHandler) List(w http.ResponseWriter, r *http.Request) {
 	if uidStr != "" {
 		uid, err := uuid.Parse(uidStr)
 		if err != nil {
+			h.logger.Warn("invalid user_id format in list", zap.String("user_id", uidStr), zap.Error(err))
 			writeError(w, http.StatusBadRequest, "invalid user_id format")
 			return
 		}
@@ -78,6 +84,7 @@ func (h *SubscriptionHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	subs, err := h.service.List(r.Context(), userID, serviceName)
 	if err != nil {
+		h.logger.Error("failed to fetch subscriptions", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, "failed to fetch subscriptions")
 		return
 	}
@@ -88,6 +95,57 @@ func (h *SubscriptionHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, subs)
+}
+
+// CalculateTotal godoc
+// @Summary Расчет суммарной стоимости
+// @Description Считает суммарную стоимость подписок за выбранный период
+// @Tags subscriptions
+// @Produce json
+// @Param start_date query string true "Дата начала периода (MM-YYYY)"
+// @Param end_date query string true "Дата окончания периода (MM-YYYY)"
+// @Param user_id query string false "ID пользователя (UUID)"
+// @Param service_name query string false "Название сервиса"
+// @Success 200 {object} map[string]int "Возвращает total_cost"
+// @Failure 400 {object} map[string]string "Bad Request"
+// @Failure 500 {object} map[string]string "Internal Server Error"
+// @Router /subscriptions/total [get]
+func (h *SubscriptionHandler) CalculateTotal(w http.ResponseWriter, r *http.Request) {
+	var userID *uuid.UUID
+	uidStr := r.URL.Query().Get("user_id")
+	if uidStr != "" {
+		uid, err := uuid.Parse(uidStr)
+		if err != nil {
+			h.logger.Warn("invalid user_id format in total", zap.String("user_id", uidStr), zap.Error(err))
+			writeError(w, http.StatusBadRequest, "invalid user_id format")
+			return
+		}
+		userID = &uid
+	}
+
+	serviceName := r.URL.Query().Get("service_name")
+	startDateStr := r.URL.Query().Get("start_date")
+	endDateStr := r.URL.Query().Get("end_date")
+
+	if startDateStr == "" || endDateStr == "" {
+		h.logger.Warn("missing period parameters in total")
+		writeError(w, http.StatusBadRequest, "start_date and end_date query parameters are required")
+		return
+	}
+
+	total, err := h.service.CalculateTotal(r.Context(), userID, serviceName, startDateStr, endDateStr)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidDateFormat) || errors.Is(err, service.ErrInvalidDateOrder) {
+			h.logger.Warn("validation error in calculate total", zap.Error(err))
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		h.logger.Error("failed to calculate total", zap.Error(err))
+		writeError(w, http.StatusInternalServerError, "failed to calculate total")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]int{"total_cost": total})
 }
 
 // GetByID godoc
@@ -105,6 +163,7 @@ func (h *SubscriptionHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
+		h.logger.Warn("invalid subscription ID format in GetByID", zap.String("id", idStr), zap.Error(err))
 		writeError(w, http.StatusBadRequest, "invalid subscription ID")
 		return
 	}
@@ -112,9 +171,11 @@ func (h *SubscriptionHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	sub, err := h.service.GetByID(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, service.ErrSubscriptionNotFound) {
+			h.logger.Warn("subscription not found in GetByID", zap.String("id", idStr))
 			writeError(w, http.StatusNotFound, err.Error())
 			return
 		}
+		h.logger.Error("failed to get subscription", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, "failed to get subscription")
 		return
 	}
@@ -139,12 +200,14 @@ func (h *SubscriptionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
+		h.logger.Warn("invalid subscription ID format in Update", zap.String("id", idStr), zap.Error(err))
 		writeError(w, http.StatusBadRequest, "invalid subscription ID")
 		return
 	}
 
 	var dto service.UpdateDTO
 	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+		h.logger.Warn("invalid request body in Update", zap.Error(err))
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -152,13 +215,16 @@ func (h *SubscriptionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	sub, err := h.service.Update(r.Context(), id, dto)
 	if err != nil {
 		if errors.Is(err, service.ErrSubscriptionNotFound) {
+			h.logger.Warn("subscription not found in Update", zap.String("id", idStr))
 			writeError(w, http.StatusNotFound, err.Error())
 			return
 		}
 		if errors.Is(err, service.ErrInvalidDateFormat) || errors.Is(err, service.ErrInvalidDateOrder) {
+			h.logger.Warn("validation error during update", zap.Error(err))
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		h.logger.Error("failed to update subscription", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, "failed to update subscription")
 		return
 	}
@@ -181,52 +247,23 @@ func (h *SubscriptionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
+		h.logger.Warn("invalid subscription ID format in Delete", zap.String("id", idStr), zap.Error(err))
 		writeError(w, http.StatusBadRequest, "invalid subscription ID")
 		return
 	}
 
 	if err := h.service.Delete(r.Context(), id); err != nil {
 		if errors.Is(err, service.ErrSubscriptionNotFound) {
+			h.logger.Warn("subscription not found in Delete", zap.String("id", idStr))
 			writeError(w, http.StatusNotFound, err.Error())
 			return
 		}
+		h.logger.Error("failed to delete subscription", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, "failed to delete subscription")
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *SubscriptionHandler) CalculateTotal(w http.ResponseWriter, r *http.Request) {
-	var userID *uuid.UUID
-	uidStr := r.URL.Query().Get("user_id")
-	if uidStr != "" {
-		uid, err := uuid.Parse(uidStr)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid user_id format")
-			return
-		}
-		userID = &uid
-	}
-
-	serviceName := r.URL.Query().Get("service_name")
-	startDateStr := r.URL.Query().Get("start_date")
-	endDateStr := r.URL.Query().Get("end_date")
-
-	if startDateStr == "" || endDateStr == "" {
-		writeError(w, http.StatusBadRequest, "start_date and end_date query parameters are required")
-		return
-	}
-
-	total, err := h.service.CalculateTotal(r.Context(), userID, serviceName, startDateStr, endDateStr)
-	if err != nil {
-		if errors.Is(err, service.ErrInvalidDateFormat) || errors.Is(err, service.ErrInvalidDateOrder) {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "failed to calculate total")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]int{"total_cost": total})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

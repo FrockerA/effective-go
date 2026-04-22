@@ -64,6 +64,7 @@ func (s *SubscriptionService) Create(ctx context.Context, dto CreateDTO) (*model
 	}
 
 	sub := &model.Subscription{
+		ID:          uuid.New(),
 		ServiceName: dto.ServiceName,
 		Price:       dto.Price,
 		UserID:      dto.UserID,
